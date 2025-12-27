@@ -17,6 +17,9 @@ import java.util.List;
 public class ChatForm extends JFrame {
     private final AuthService.Session session;
     private final ChatService chat = new ChatService();
+    
+    private final AuthService authService = new AuthService(); 
+    private Timer heartbeatTimer;
 
     private final JTextField txtTo = new JTextField(16);
     private final JTextField txtMsg = new JTextField(24);
@@ -48,11 +51,44 @@ public class ChatForm extends JFrame {
         btnSend.addActionListener(e -> onSend());
         btnRefresh.addActionListener(e -> loadInbox());
 
+        startHeartbeat();
         loadInbox();
+    }
+    private void startHeartbeat() {
+        heartbeatTimer = new Timer(3000, e -> checkSessionStatus());
+        heartbeatTimer.start();
+    }
+    
+    private void checkSessionStatus() {
+        new SwingWorker<Boolean, Void>() {
+            @Override
+            protected Boolean doInBackground() {
+                return authService.isSessionValid(session.username(), session.sessionId());
+            }
+
+            @Override
+            protected void done() {
+                try {
+                    boolean isValid = get();
+                    if (!isValid) {
+                        heartbeatTimer.stop();
+                        JOptionPane.showMessageDialog(ChatForm.this, 
+                                "Tài khoản của bạn đã được đăng nhập ở nơi khác!\nỨng dụng sẽ tự đăng xuất.",
+                                "Session Expired",
+                                JOptionPane.WARNING_MESSAGE);
+                        
+                        new LoginForm().setVisible(true);
+                        dispose();
+                    }
+                } catch (Exception ex) {
+                    System.out.println("Heartbeat check failed: " + ex.getMessage());
+                }
+            }
+        }.execute();
     }
 
     private void onSend() {
-         String to = txtTo.getText().trim();
+    String to = txtTo.getText().trim();
     String msg = txtMsg.getText();
 
     btnSend.setEnabled(false);
@@ -70,7 +106,7 @@ public class ChatForm extends JFrame {
             try {
                 get();
                 txtMsg.setText("");
-                loadInbox(); // ok vì loadInbox cũng sẽ sửa tiếp
+                loadInbox(); 
             } catch (Exception ex) {
                 area.append("\n[SEND FAILED] " + ex.getMessage() + "\n");
             }

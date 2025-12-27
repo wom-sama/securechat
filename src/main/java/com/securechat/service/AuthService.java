@@ -7,6 +7,7 @@ package com.securechat.service;
 import com.securechat.dao.UserDAO;
 import com.securechat.security.*;
 import org.bson.Document;
+import java.util.UUID;
 
 import java.security.KeyPair;
 
@@ -64,6 +65,8 @@ public class AuthService {
         if (!PBKDF2.constantTimeEquals(expected, actual)) {
             throw new IllegalArgumentException("Invalid password");
         }
+        String newSessionId = UUID.randomUUID().toString();
+        userDAO.updateSessionId(username, newSessionId);
 
         // Unprotect private keys into memory (session)
         var signBlob = new KeyProtector.ProtectedBlob(
@@ -88,7 +91,11 @@ public class AuthService {
         var signPub = KeyProtector.decodeEd25519Public(B64.dec(u.getString("signPubB64")));
         var ecdhPub = KeyProtector.decodeX25519Public(B64.dec(u.getString("ecdhPubB64")));
 
-        return new Session(username, signPub, signPriv, ecdhPub, ecdhPriv);
+        return new Session(username, signPub, signPriv, ecdhPub, ecdhPriv, newSessionId);
+    }
+    public boolean isSessionValid(String username, String mySessionId) {
+        String dbSessionId = userDAO.getSessionId(username);
+        return mySessionId != null && mySessionId.equals(dbSessionId);
     }
 
     public record Session(
@@ -96,6 +103,7 @@ public class AuthService {
             java.security.PublicKey signPub,
             java.security.PrivateKey signPriv,
             java.security.PublicKey ecdhPub,
-            java.security.PrivateKey ecdhPriv
+            java.security.PrivateKey ecdhPriv,
+            String sessionId 
     ) {}
 }
