@@ -1,0 +1,5 @@
+target/
+*.log
+.nb-gradle/
+nbproject/private/
+.env
