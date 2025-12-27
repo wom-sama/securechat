@@ -21,19 +21,17 @@ public class ChatService {
     private final MessageDAO messageDAO = new MessageDAO();
 
     public void sendMessage(AuthService.Session sender, String toUser, String plaintext) {
-        Document receiver = userDAO.findByUsername(toUser);
-        if (receiver == null) throw new IllegalArgumentException("Receiver not found");
-
-        PublicKey receiverEcdhPub = KeyProtector.decodeX25519Public(B64.dec(receiver.getString("ecdhPubB64")));
+        Document receiverDoc = userDAO.findByUsername(toUser);
+        if (receiverDoc == null) throw new IllegalArgumentException("Receiver not found");
+        
+        Document senderDoc = userDAO.findByUsername(sender.username());
 
         long ts = System.currentTimeMillis();
-
-        // 1) SIGN FIRST
         byte[] digestInput = Canonical.digestInput(sender.username(), toUser, ts, plaintext);
         byte[] digest = SHA256.hash(digestInput);
         byte[] sig = Keys.signEd25519(sender.signPriv(), digest);
-
-        // Build payload (simple text format for demo; thực tế có thể JSON)
+        
+        // Payload chung
         String payload =
                 "from=" + sender.username() + "\n" +
                 "to=" + toUser + "\n" +
@@ -41,23 +39,30 @@ public class ChatService {
                 "msg=" + plaintext + "\n" +
                 "digestB64=" + B64.enc(digest) + "\n" +
                 "sigB64=" + B64.enc(sig) + "\n";
-
         byte[] payloadBytes = payload.getBytes(StandardCharsets.UTF_8);
 
-        // 2) ECDH (ephemeral) + HKDF -> AES key
+        // --- BẢN 1: Gửi cho Người nhận (Bob) ---
+        PublicKey bobEcdhPub = KeyProtector.decodeX25519Public(B64.dec(receiverDoc.getString("ecdhPubB64")));
+        createAndSaveMessage(sender.username(), toUser, null, ts, payloadBytes, bobEcdhPub);
+        // --- BẢN 2: Gửi cho Chính mình (Alice - để lưu history) ---
+        PublicKey aliceEcdhPub = KeyProtector.decodeX25519Public(B64.dec(senderDoc.getString("ecdhPubB64")));
+        createAndSaveMessage(sender.username(), sender.username(), toUser, ts, payloadBytes, aliceEcdhPub);
+    }
+    
+    private void createAndSaveMessage(String from, String to, String originalTo, long ts, byte[] payloadBytes, PublicKey recipientPub) {
         KeyPair eph = Keys.genX25519();
-        byte[] shared = Keys.x25519SharedSecret(eph.getPrivate(), receiverEcdhPub);
-
+        byte[] shared = Keys.x25519SharedSecret(eph.getPrivate(), recipientPub);
         byte[] iv = Rand.bytes(12);
         byte[] aesKey = HKDF.deriveAes256(shared, iv, "SecureChat msg key".getBytes(StandardCharsets.UTF_8));
-
-        // 3) ENCRYPT (AES-GCM), bind AAD to metadata
-        byte[] aad = Canonical.aad(sender.username(), toUser, ts);
+        
+        String realTo = (originalTo != null) ? originalTo : to;
+        byte[] aad = Canonical.aad(from, realTo, ts);
+        
         byte[] ct = AesGcm.encrypt(aesKey, iv, payloadBytes, aad);
-
-        Document msgDoc = new Document()
-                .append("from", sender.username())
-                .append("to", toUser)
+        
+        Document doc = new Document()
+                .append("from", from)
+                .append("to", to)
                 .append("ts", ts)
                 .append("ephPubB64", B64.enc(KeyProtector.pubEncoded(eph.getPublic())))
                 .append("ivB64", B64.enc(iv))
@@ -65,70 +70,76 @@ public class ChatService {
                 .append("encAlg", "AES/GCM")
                 .append("kexAlg", "X25519")
                 .append("sigAlg", "Ed25519");
-
-        messageDAO.insertMessage(msgDoc);
+        
+        if (originalTo != null) {
+            doc.append("originalTo", originalTo); // Đánh dấu đây là tin nhắn trong mục "Đã gửi"
+        }
+        
+        messageDAO.insertMessage(doc);
     }
 
-    public List<DecryptedMessage> loadInbox(AuthService.Session receiver, int limit) {
-        List<Document> docs = messageDAO.findInbox(receiver.username(), limit);
+    // [CẬP NHẬT] Load hội thoại
+    public List<DecryptedMessage> loadConversation(AuthService.Session session, String partner, int limit) {
+        List<Document> docs = messageDAO.findConversation(session.username(), partner, limit);
         List<DecryptedMessage> out = new ArrayList<>();
 
         for (Document d : docs) {
+            DecryptedMessage dm = new DecryptedMessage();
             try {
+                // Lấy thông tin gốc từ DB
                 String from = d.getString("from");
-                String to = d.getString("to");
+                // Nếu có originalTo, tức là tin này do mình gửi đi. Nếu không, là tin mình nhận.
+                String originalTo = d.getString("originalTo");
+                String realTo = (originalTo != null) ? originalTo : d.getString("to");
+                
                 long ts = d.getLong("ts");
 
                 PublicKey ephPub = KeyProtector.decodeX25519Public(B64.dec(d.getString("ephPubB64")));
                 byte[] iv = B64.dec(d.getString("ivB64"));
                 byte[] ct = B64.dec(d.getString("ciphertextB64"));
 
-                // Derive AES key from ECDH shared secret
-                byte[] shared = Keys.x25519SharedSecret(receiver.ecdhPriv(), ephPub);
+                // Decrypt (Dùng khóa của mình vì bản ghi này được mã hóa cho mình - dù là inbox hay sent)
+                byte[] shared = Keys.x25519SharedSecret(session.ecdhPriv(), ephPub);
                 byte[] aesKey = HKDF.deriveAes256(shared, iv, "SecureChat msg key".getBytes(StandardCharsets.UTF_8));
 
-                byte[] aad = Canonical.aad(from, to, ts);
+                byte[] aad = Canonical.aad(from, realTo, ts);
                 byte[] payloadBytes = AesGcm.decrypt(aesKey, iv, ct, aad);
                 String payload = new String(payloadBytes, StandardCharsets.UTF_8);
 
-                // Parse payload (demo parser)
                 String msg = extract(payload, "msg");
                 String sigB64 = extract(payload, "sigB64");
 
-                // Verify signature using sender public key from DB
+                // Verify
                 Document senderDoc = userDAO.findByUsername(from);
-                if (senderDoc == null) throw new IllegalStateException("Sender missing");
+                if (senderDoc != null) {
+                    PublicKey senderSignPub = KeyProtector.decodeEd25519Public(B64.dec(senderDoc.getString("signPubB64")));
+                    byte[] digestInput = Canonical.digestInput(from, realTo, ts, msg);
+                    byte[] digest = SHA256.hash(digestInput);
+                    dm.signatureValid = Keys.verifyEd25519(senderSignPub, digest, B64.dec(sigB64));
+                }
 
-                PublicKey senderSignPub = KeyProtector.decodeEd25519Public(B64.dec(senderDoc.getString("signPubB64")));
-
-                byte[] digestInput = Canonical.digestInput(from, to, ts, msg);
-                byte[] digest = SHA256.hash(digestInput);
-                boolean ok = Keys.verifyEd25519(senderSignPub, digest, B64.dec(sigB64));
-
-                DecryptedMessage dm = new DecryptedMessage();
                 dm.from = from;
-                dm.to = to;
+                dm.to = realTo;
                 dm.ts = ts;
                 dm.plaintext = msg;
-                dm.signatureValid = ok;
                 out.add(dm);
 
             } catch (Exception ex) {
-                // Nếu decrypt/verify fail, vẫn cho hiện “(failed)” để demo tấn công/sửa DB
-                DecryptedMessage dm = new DecryptedMessage();
-                dm.from = d.getString("from");
-                dm.to = d.getString("to");
-                dm.ts = d.getLong("ts");
-                dm.plaintext = "(DECRYPT FAILED)";
+                dm.plaintext = "(DECRYPT ERROR)";
                 dm.signatureValid = false;
+                dm.from = d.getString("from");
+                dm.ts = d.getLong("ts");
                 out.add(dm);
             }
         }
         return out;
     }
+    
+    public List<String> getRecentContacts(String myUser) {
+        return messageDAO.getRecentContacts(myUser);
+    }
 
     private static String extract(String payload, String key) {
-        // format: key=value
         String[] lines = payload.split("\n");
         for (String line : lines) {
             int idx = line.indexOf('=');
@@ -139,4 +150,8 @@ public class ChatService {
         }
         return "";
     }
+    //kiem tra user ton tai
+    public boolean checkUserExists(String username) {
+    return userDAO.findByUsername(username) != null;
+}
 }

@@ -91,14 +91,29 @@ public class LoginForm extends JFrame {
     }
 
     private void onLogin() {
-        String u = txtUser.getText().trim();
-        char[] pw = txtPass.getPassword();
-        try {
-            var session = auth.login(u, pw);
-            new ChatForm(session).setVisible(true);
-            dispose();
-        } catch (Exception ex) {
-            lbl.setText("Login failed: " + ex.getMessage());
+    String u = txtUser.getText().trim();
+    char[] pw = txtPass.getPassword();
+    btnLogin.setEnabled(false);
+    btnRegister.setEnabled(false);
+    lbl.setText("Verifying...");
+    new SwingWorker<AuthService.Session, Void>() {
+        @Override
+        protected AuthService.Session doInBackground() throws Exception {
+            return auth.login(u, pw);
         }
-    }
+
+        @Override
+        protected void done() {
+            try {
+                var session = get(); 
+                new ChatForm(session).setVisible(true);
+                dispose(); 
+            } catch (Exception ex) {
+                btnLogin.setEnabled(true);
+                btnRegister.setEnabled(true);
+                lbl.setText("Login failed: " + ex.getMessage());
+            }
+        }
+    }.execute();
+}
 }
