@@ -8,6 +8,9 @@ import com.securechat.service.AuthService;
 import javax.swing.*;
 import java.awt.*;
 
+import java.awt.event.KeyAdapter;
+import java.awt.event.KeyEvent;
+
 public class LoginForm extends JFrame {
     private final AuthService auth = new AuthService();
 
@@ -34,6 +37,15 @@ public class LoginForm extends JFrame {
         JPanel btns = new JPanel(new FlowLayout(FlowLayout.RIGHT));
         btns.add(btnRegister);
         btns.add(btnLogin);
+        
+        txtPass.addKeyListener(new KeyAdapter() {
+            @Override
+            public void keyPressed(KeyEvent e) {
+                if (e.getKeyCode() == KeyEvent.VK_ENTER) {
+                    onLogin();
+                }
+            }
+        });
 
         add(p, BorderLayout.CENTER);
         add(btns, BorderLayout.SOUTH);
@@ -41,7 +53,12 @@ public class LoginForm extends JFrame {
 
         btnLogin.addActionListener(e -> onLogin());
         btnRegister.addActionListener(e -> onRegister());
+        btnLogin.addActionListener(e -> onLogin());
+        btnRegister.addActionListener(e -> onRegister());
+        
     }
+    
+    
 
     private void onRegister() {
          String u = txtUser.getText().trim();
