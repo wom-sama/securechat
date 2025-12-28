@@ -106,11 +106,12 @@ public class ChatForm extends JFrame {
 
         // --- EVENTS ---
         
-        contactList.addMouseListener(new MouseAdapter() {
-            public void mouseClicked(MouseEvent evt) {
+        contactList.addListSelectionListener(e -> {
+            if (!e.getValueIsAdjusting()) {
                 String selected = contactList.getSelectedValue();
                 if (selected != null) {
                     switchToChat(selected);
+                    txtNewContact.setText(""); 
                 }
             }
         });
@@ -130,7 +131,7 @@ public class ChatForm extends JFrame {
                     btnAddContact.setEnabled(true);
                     try {
                         if (get()) {
-                            // User tồn tại -> Chuyển cảnh
+                
                             switchToChat(newMate);
                             txtNewContact.setText("");
                         } else {
@@ -223,7 +224,6 @@ public class ChatForm extends JFrame {
         JLabel lblContent = new JLabel("<html><body style='width: 200px'>" + m.plaintext + "</body></html>");
         lblContent.setFont(new Font("Segoe UI", Font.PLAIN, 14));
         
-        // [FIX FONT] Thay ký tự đặc biệt bằng Text an toàn hoặc Font chuẩn
         String statusText = m.signatureValid ? "[Valid]" : "[Invalid]";
         Color statusColor = m.signatureValid ? new Color(0, 128, 0) : Color.RED;
         

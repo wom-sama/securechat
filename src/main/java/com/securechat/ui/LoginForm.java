@@ -7,6 +7,7 @@ import com.securechat.service.AuthService;
 
 import javax.swing.*;
 import java.awt.*;
+import java.awt.event.ActionListener;
 
 import java.awt.event.KeyAdapter;
 import java.awt.event.KeyEvent;
@@ -38,11 +39,15 @@ public class LoginForm extends JFrame {
         btns.add(btnRegister);
         btns.add(btnLogin);
         
+       ActionListener loginAction = e -> doLoginProcess();
+
+        btnLogin.addActionListener(loginAction);
+        
         txtPass.addKeyListener(new KeyAdapter() {
             @Override
             public void keyPressed(KeyEvent e) {
                 if (e.getKeyCode() == KeyEvent.VK_ENTER) {
-                    onLogin();
+                    doLoginProcess();
                 }
             }
         });
@@ -53,9 +58,6 @@ public class LoginForm extends JFrame {
 
         btnLogin.addActionListener(e -> onLogin());
         btnRegister.addActionListener(e -> onRegister());
-        btnLogin.addActionListener(e -> onLogin());
-        btnRegister.addActionListener(e -> onRegister());
-        
     }
     
     
@@ -116,4 +118,42 @@ public class LoginForm extends JFrame {
         }
     }.execute();
 }
+    private void doLoginProcess() {
+        if (!btnLogin.isEnabled()) return;
+
+        String u = txtUser.getText().trim();
+        char[] pw = txtPass.getPassword();
+
+        btnLogin.setEnabled(false);
+        btnRegister.setEnabled(false);
+        txtUser.setEnabled(false); 
+        txtPass.setEnabled(false);
+        lbl.setText("Verifying...");
+
+        new SwingWorker<AuthService.Session, Void>() {
+            @Override
+            protected AuthService.Session doInBackground() throws Exception {
+                return auth.login(u, pw);
+            }
+
+            @Override
+            protected void done() {
+                try {
+                    var session = get();
+                    new ChatForm(session).setVisible(true);
+                    dispose();
+                } catch (Exception ex) {
+                    btnLogin.setEnabled(true);
+                    btnRegister.setEnabled(true);
+                    txtUser.setEnabled(true);
+                    txtPass.setEnabled(true);
+                    lbl.setText("Login failed: " + ex.getMessage());
+                    txtPass.requestFocus(); 
+                }
+            }
+        }.execute();
+    }
+    
+    
+    
 }
