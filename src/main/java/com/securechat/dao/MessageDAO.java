@@ -83,4 +83,15 @@ public class MessageDAO {
                 .into(out);
         return out;
     }
+   // Tìm danh sách những người vừa gửi tin nhắn cho mình sau thời điểm lastCheck
+    // Dùng cho tính năng thông báo Real-time
+    public List<String> getSendersSince(String myUsername, long lastCheckTime) {
+        // Tìm các tin nhắn có 'to' là mình VÀ 'ts' lớn hơn thời gian check lần cuối
+        return col().distinct("from", 
+                Filters.and(
+                    Filters.eq("to", myUsername),
+                    Filters.gt("ts", lastCheckTime)
+                ), String.class)
+                .into(new ArrayList<>());
+    }
 }

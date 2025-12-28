@@ -1,14 +1,9 @@
-/*
- * Click nbfs://nbhost/SystemFileSystem/Templates/Licenses/license-default.txt to change this license
- * Click nbfs://nbhost/SystemFileSystem/Templates/Classes/Class.java to edit this template
- */
 package com.securechat.ui;
 import com.securechat.service.AuthService;
 
 import javax.swing.*;
 import java.awt.*;
 import java.awt.event.ActionListener;
-
 import java.awt.event.KeyAdapter;
 import java.awt.event.KeyEvent;
 
@@ -39,10 +34,12 @@ public class LoginForm extends JFrame {
         btns.add(btnRegister);
         btns.add(btnLogin);
         
-       ActionListener loginAction = e -> doLoginProcess();
+        // [FIX] Chỉ khai báo Action 1 lần duy nhất
+        ActionListener loginAction = e -> doLoginProcess();
 
         btnLogin.addActionListener(loginAction);
         
+        // Sự kiện Enter
         txtPass.addKeyListener(new KeyAdapter() {
             @Override
             public void keyPressed(KeyEvent e) {
@@ -56,69 +53,42 @@ public class LoginForm extends JFrame {
         add(btns, BorderLayout.SOUTH);
         add(lbl, BorderLayout.NORTH);
 
-        btnLogin.addActionListener(e -> onLogin());
+        // Nút Register giữ nguyên
         btnRegister.addActionListener(e -> onRegister());
     }
-    
-    
 
     private void onRegister() {
-         String u = txtUser.getText().trim();
-    char[] pw = txtPass.getPassword();
+        String u = txtUser.getText().trim();
+        char[] pw = txtPass.getPassword();
 
-    btnRegister.setEnabled(false);
-    btnLogin.setEnabled(false);
-    lbl.setText("Registering (crypto + NoSQL)...");
+        btnRegister.setEnabled(false);
+        btnLogin.setEnabled(false);
+        lbl.setText("Registering (crypto + NoSQL)...");
 
-    new SwingWorker<Void, Void>() {
-
-        @Override
-        protected Void doInBackground() throws Exception {
-            auth.register(u, pw);
-            return null;
-        }
-
-        @Override
-        protected void done() {
-            btnRegister.setEnabled(true);
-            btnLogin.setEnabled(true);
-            try {
-                get();
-                lbl.setText("Registered OK. Now login.");
-            } catch (Exception ex) {
-                lbl.setText("Register failed: " + ex.getMessage());
+        new SwingWorker<Void, Void>() {
+            @Override
+            protected Void doInBackground() throws Exception {
+                auth.register(u, pw);
+                return null;
             }
-        }
-    }.execute();
+
+            @Override
+            protected void done() {
+                btnRegister.setEnabled(true);
+                btnLogin.setEnabled(true);
+                try {
+                    get();
+                    lbl.setText("Registered OK. Now login.");
+                } catch (Exception ex) {
+                    lbl.setText("Register failed: " + ex.getMessage());
+                }
+            }
+        }.execute();
     }
 
-    private void onLogin() {
-    String u = txtUser.getText().trim();
-    char[] pw = txtPass.getPassword();
-    btnLogin.setEnabled(false);
-    btnRegister.setEnabled(false);
-    lbl.setText("Verifying...");
-    new SwingWorker<AuthService.Session, Void>() {
-        @Override
-        protected AuthService.Session doInBackground() throws Exception {
-            return auth.login(u, pw);
-        }
-
-        @Override
-        protected void done() {
-            try {
-                var session = get(); 
-                new ChatForm(session).setVisible(true);
-                dispose(); 
-            } catch (Exception ex) {
-                btnLogin.setEnabled(true);
-                btnRegister.setEnabled(true);
-                lbl.setText("Login failed: " + ex.getMessage());
-            }
-        }
-    }.execute();
-}
+    // [FIX] Hàm xử lý Login duy nhất (kết hợp chặn click)
     private void doLoginProcess() {
+        // Chặn nếu đang xử lý
         if (!btnLogin.isEnabled()) return;
 
         String u = txtUser.getText().trim();
@@ -126,7 +96,7 @@ public class LoginForm extends JFrame {
 
         btnLogin.setEnabled(false);
         btnRegister.setEnabled(false);
-        txtUser.setEnabled(false); 
+        txtUser.setEnabled(false); // Khóa luôn ô nhập
         txtPass.setEnabled(false);
         lbl.setText("Verifying...");
 
@@ -153,7 +123,4 @@ public class LoginForm extends JFrame {
             }
         }.execute();
     }
-    
-    
-    
 }

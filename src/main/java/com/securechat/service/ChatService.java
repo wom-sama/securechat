@@ -154,4 +154,8 @@ public class ChatService {
     public boolean checkUserExists(String username) {
     return userDAO.findByUsername(username) != null;
 }
+    // Kiểm tra xem có tin nhắn mới nào từ sau lần check cuối không
+    public List<String> checkNewMessages(String myUser, long lastCheckTime) {
+        return messageDAO.getSendersSince(myUser, lastCheckTime);
+    }
 }
