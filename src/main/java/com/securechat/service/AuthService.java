@@ -1,14 +1,9 @@
-/*
- * Click nbfs://nbhost/SystemFileSystem/Templates/Licenses/license-default.txt to change this license
- * Click nbfs://nbhost/SystemFileSystem/Templates/Classes/Class.java to edit this template
- */
 package com.securechat.service;
 
 import com.securechat.dao.UserDAO;
 import com.securechat.security.*;
 import org.bson.Document;
 import java.util.UUID;
-
 import java.security.KeyPair;
 
 public class AuthService {
@@ -19,16 +14,13 @@ public class AuthService {
             throw new IllegalArgumentException("Username already exists");
         }
 
-        // 1) Password hash (PBKDF2)
         byte[] pwdSalt = Rand.bytes(16);
         int pwdIters = 200_000;
         byte[] pwdHash = PBKDF2.deriveKey(password, pwdSalt, pwdIters, 32);
 
-        // 2) Generate signing + ECDH keypairs
         KeyPair signKP = Keys.genEd25519();
         KeyPair ecdhKP = Keys.genX25519();
 
-        // 3) Protect private keys by password (PBKDF2 -> AES-GCM)
         var signBlob = KeyProtector.protect(KeyProtector.privEncoded(signKP.getPrivate()), password);
         var ecdhBlob = KeyProtector.protect(KeyProtector.privEncoded(ecdhKP.getPrivate()), password);
 
@@ -37,13 +29,11 @@ public class AuthService {
                 .append("pwdSaltB64", B64.enc(pwdSalt))
                 .append("pwdHashB64", B64.enc(pwdHash))
                 .append("pwdIters", pwdIters)
-
                 .append("signPubB64", B64.enc(KeyProtector.pubEncoded(signKP.getPublic())))
                 .append("signPrivEncB64", signBlob.ciphertextB64())
                 .append("signPrivIvB64", signBlob.ivB64())
                 .append("signPrivSaltKdfB64", signBlob.saltB64())
                 .append("signPrivKdfIters", signBlob.iters())
-
                 .append("ecdhPubB64", B64.enc(KeyProtector.pubEncoded(ecdhKP.getPublic())))
                 .append("ecdhPrivEncB64", ecdhBlob.ciphertextB64())
                 .append("ecdhPrivIvB64", ecdhBlob.ivB64())
@@ -68,7 +58,6 @@ public class AuthService {
         String newSessionId = UUID.randomUUID().toString();
         userDAO.updateSessionId(username, newSessionId);
 
-        // Unprotect private keys into memory (session)
         var signBlob = new KeyProtector.ProtectedBlob(
                 u.getString("signPrivEncB64"),
                 u.getString("signPrivIvB64"),
@@ -93,9 +82,19 @@ public class AuthService {
 
         return new Session(username, signPub, signPriv, ecdhPub, ecdhPriv, newSessionId);
     }
+    
     public boolean isSessionValid(String username, String mySessionId) {
         String dbSessionId = userDAO.getSessionId(username);
         return mySessionId != null && mySessionId.equals(dbSessionId);
+    }
+    
+    // [MỚI] Các hàm hỗ trợ Last Logout
+    public void logout(String username) {
+        userDAO.updateLastLogout(username);
+    }
+    
+    public long getLastLogoutTime(String username) {
+        return userDAO.getLastLogout(username);
     }
 
     public record Session(

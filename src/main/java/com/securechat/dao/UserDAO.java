@@ -1,7 +1,3 @@
-/*
- * Click nbfs://nbhost/SystemFileSystem/Templates/Licenses/license-default.txt to change this license
- * Click nbfs://nbhost/SystemFileSystem/Templates/Classes/Class.java to edit this template
- */
 package com.securechat.dao;
 
 import com.securechat.config.AppConfig;
@@ -23,6 +19,7 @@ public class UserDAO {
     public void insertUser(Document userDoc) {
         col().insertOne(userDoc);
     }
+    
     public void updateSessionId(String username, String sessionId) {
         col().updateOne(
             Filters.eq("username", username), 
@@ -34,9 +31,26 @@ public class UserDAO {
         Document doc = col().find(Filters.eq("username", username))
                             .projection(new Document("sessionId", 1))
                             .first();
-        if (doc != null) {
-            return doc.getString("sessionId");
-        }
+        if (doc != null) return doc.getString("sessionId");
         return null;
+    }
+
+    // [MỚI] Cập nhật thời điểm đăng xuất
+    public void updateLastLogout(String username) {
+        col().updateOne(
+            Filters.eq("username", username),
+            Updates.set("lastLogout", System.currentTimeMillis())
+        );
+    }
+
+    // [MỚI] Lấy thời điểm đăng xuất lần cuối (để tìm tin nhắn offline)
+    public long getLastLogout(String username) {
+        Document doc = col().find(Filters.eq("username", username))
+                            .projection(new Document("lastLogout", 1))
+                            .first();
+        if (doc != null && doc.containsKey("lastLogout")) {
+            return doc.getLong("lastLogout");
+        }
+        return 0L; 
     }
 }

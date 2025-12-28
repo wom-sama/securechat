@@ -1,4 +1,4 @@
-/* ChatForm.java - Bản Nâng cao: Unread Badge + UI Fix */
+/* ChatForm.java - Bản Fix Offline Message + Notification Leak */
 package com.securechat.ui;
 
 import com.securechat.model.DecryptedMessage;
@@ -14,6 +14,8 @@ import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.List;
 import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.Set;
 
 public class ChatForm extends JFrame {
     private final AuthService.Session session;
@@ -26,9 +28,11 @@ public class ChatForm extends JFrame {
     
     private String currentPartner = null;
 
-    // [MỚI] Dùng Object ContactItem thay vì String
-    private final DefaultListModel<ContactItem> contactListModel = new DefaultListModel<>();
-    private final JList<ContactItem> contactList = new JList<>(contactListModel);
+    // [MỚI] Set chứa danh sách những người có tin nhắn chưa đọc
+    private final Set<String> unreadSenders = new HashSet<>();
+
+    private final DefaultListModel<String> contactListModel = new DefaultListModel<>();
+    private final JList<String> contactList = new JList<>(contactListModel);
     
     private final JPanel chatAreaPanel = new JPanel();
     private final JScrollPane chatScrollPane = new JScrollPane(chatAreaPanel);
@@ -37,25 +41,17 @@ public class ChatForm extends JFrame {
     private final JLabel lblCurrentPartner = new JLabel("Chọn một người để bắt đầu chat");
     private final JTextField txtNewContact = new JTextField(); 
 
-    // Class nội bộ để lưu trạng thái Contact
-    private static class ContactItem {
-        String username;
-        boolean hasUnread; // Có tin nhắn mới chưa đọc
-
-        ContactItem(String username) { this.username = username; }
-        
-        @Override
-        public String toString() { return username; } // Fallback
-    }
-
     public ChatForm(AuthService.Session session) {
         super("SecureChat - " + session.username());
         this.session = session;
-        setDefaultCloseOperation(EXIT_ON_CLOSE);
+        
+        // [QUAN TRỌNG] Chỉ Dispose, không Exit JVM để ta còn xử lý logout logic
+        setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
+        
         setSize(900, 600);
         setLocationRelativeTo(null);
 
-        // --- LAYOUT SETUP ---
+        // --- LAYOUT SETUP (Giữ nguyên) ---
         JSplitPane splitPane = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT);
         splitPane.setDividerLocation(250); 
 
@@ -77,7 +73,7 @@ public class ChatForm extends JFrame {
         myInfoPanel.add(searchPanel);
         leftPanel.add(myInfoPanel, BorderLayout.NORTH);
 
-        // [MỚI] Custom Renderer để vẽ chấm đỏ
+        // Custom Renderer sử dụng Set unreadSenders
         contactList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
         contactList.setFixedCellHeight(40);
         contactList.setCellRenderer(new ContactRenderer());
@@ -91,7 +87,6 @@ public class ChatForm extends JFrame {
         headerPanel.add(lblCurrentPartner);
         rightPanel.add(headerPanel, BorderLayout.NORTH);
 
-        // [FIX UI] Dùng GridBagLayout để kiểm soát khoảng cách tốt hơn BoxLayout
         chatAreaPanel.setLayout(new BoxLayout(chatAreaPanel, BoxLayout.Y_AXIS));
         chatAreaPanel.setBackground(new Color(245, 245, 245));
         rightPanel.add(chatScrollPane, BorderLayout.CENTER);
@@ -101,7 +96,7 @@ public class ChatForm extends JFrame {
         txtMsg.setFont(new Font("Segoe UI", Font.PLAIN, 14));
         btnSend.setFont(new Font("Segoe UI", Font.BOLD, 14));
         btnSend.setBackground(new Color(0, 120, 215));
-        btnSend.setForeground(Color.BLACK);
+        btnSend.setForeground(Color.WHITE);
         
         footerPanel.add(txtMsg, BorderLayout.CENTER);
         footerPanel.add(btnSend, BorderLayout.EAST);
@@ -114,13 +109,14 @@ public class ChatForm extends JFrame {
         // --- EVENTS ---
         contactList.addListSelectionListener(e -> {
             if (!e.getValueIsAdjusting()) {
-                ContactItem selected = contactList.getSelectedValue();
+                String selected = contactList.getSelectedValue();
                 if (selected != null) {
-                    // [MỚI] Xóa chấm đỏ khi click vào
-                    selected.hasUnread = false;
-                    contactList.repaint(); // Vẽ lại list
-                    
-                    switchToChat(selected.username);
+                    // Xóa trạng thái unread khi click vào
+                    if (unreadSenders.contains(selected)) {
+                        unreadSenders.remove(selected);
+                        contactList.repaint(); // Vẽ lại để mất chấm đỏ
+                    }
+                    switchToChat(selected);
                     txtNewContact.setText(""); 
                 }
             }
@@ -136,7 +132,7 @@ public class ChatForm extends JFrame {
                     btnAddContact.setEnabled(true);
                     try {
                         if (get()) { switchToChat(newMate); txtNewContact.setText(""); }
-                        else JOptionPane.showMessageDialog(ChatForm.this, "Không tìm thấy user!", "Lỗi", JOptionPane.ERROR_MESSAGE);
+                        else JOptionPane.showMessageDialog(ChatForm.this, "User not found!", "Error", JOptionPane.ERROR_MESSAGE);
                     } catch (Exception ex) { }
                 }
             }.execute();
@@ -145,23 +141,64 @@ public class ChatForm extends JFrame {
         btnSend.addActionListener(e -> onSend());
         txtMsg.addActionListener(e -> onSend()); 
 
-        // --- STARTUP ---
+        // --- STARTUP LOGIC ---
+        // 1. Kiểm tra tin nhắn Offline (Tính từ lần logout cuối cùng)
+        checkOfflineMessages();
+        
+        // 2. Bắt đầu các Timer
         startHeartbeat();       
         startMessagePolling();  
         loadContactList();
     }
     
-    // --- Renderer để vẽ List ---
-    private static class ContactRenderer extends DefaultListCellRenderer {
+    // [FIX] Ghi đè dispose để dọn dẹp sạch sẽ khi thoát
+    @Override
+    public void dispose() {
+        // 1. Dừng Timers ngay lập tức để không hiện thông báo rác
+        if (heartbeatTimer != null) heartbeatTimer.stop();
+        if (pollingTimer != null) pollingTimer.stop();
+        
+        // 2. Lưu thời gian logout để lần sau check tin nhắn offline
+        new Thread(() -> authService.logout(session.username())).start();
+        
+        super.dispose();
+        // Nếu đây là cửa sổ cuối cùng, thoát JVM (hoặc quay về Login thì tùy logic gọi)
+    }
+
+    // [MỚI] Logic check tin nhắn khi Offline
+    private void checkOfflineMessages() {
+        new SwingWorker<List<String>, Void>() {
+            @Override
+            protected List<String> doInBackground() {
+                long lastLogout = authService.getLastLogoutTime(session.username());
+                // Nếu chưa từng logout (lần đầu dùng), thì coi như xem từ đầu
+                return chatService.checkNewMessages(session.username(), lastLogout); 
+            }
+            @Override
+            protected void done() {
+                try {
+                    List<String> offlineSenders = get();
+                    if (!offlineSenders.isEmpty()) {
+                        unreadSenders.addAll(offlineSenders);
+                        contactList.repaint(); // Cập nhật chấm đỏ
+                    }
+                } catch (Exception e) { e.printStackTrace(); }
+            }
+        }.execute();
+    }
+
+    // Renderer kiểm tra trong Set
+    private class ContactRenderer extends DefaultListCellRenderer {
         @Override
         public Component getListCellRendererComponent(JList<?> list, Object value, int index, boolean isSelected, boolean cellHasFocus) {
             JLabel lbl = (JLabel) super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus);
-            ContactItem item = (ContactItem) value;
-            lbl.setText(item.username);
+            String username = (String) value;
+            lbl.setText(username);
             lbl.setBorder(new EmptyBorder(0, 10, 0, 10));
             
-            if (item.hasUnread) {
-                lbl.setText(item.username + " ●");
+            // Check trong Set unread
+            if (unreadSenders.contains(username)) {
+                lbl.setText(username + " ●");
                 lbl.setForeground(isSelected ? Color.WHITE : Color.RED);
                 lbl.setFont(lbl.getFont().deriveFont(Font.BOLD));
             } else {
@@ -177,16 +214,11 @@ public class ChatForm extends JFrame {
             @Override protected void done() {
                 try {
                     List<String> contacts = get();
-                    List<ContactItem> oldItems = new ArrayList<>();
-                    for(int i=0; i<contactListModel.size(); i++) oldItems.add(contactListModel.get(i));
-                    
+                    String currentSelection = contactList.getSelectedValue();
                     contactListModel.clear();
-                    for (String c : contacts) {
-                        ContactItem item = new ContactItem(c);
-                        for(ContactItem old : oldItems) {
-                            if(old.username.equals(c) && old.hasUnread) item.hasUnread = true;
-                        }
-                        contactListModel.addElement(item);
+                    for (String c : contacts) contactListModel.addElement(c);
+                    if (currentSelection != null && contacts.contains(currentSelection)) {
+                        contactList.setSelectedValue(currentSelection, true);
                     }
                 } catch (Exception e) { e.printStackTrace(); }
             }
@@ -208,8 +240,11 @@ public class ChatForm extends JFrame {
     }
 
     private void updateChatUI(List<DecryptedMessage> msgs) {
-        int currentCount = chatAreaPanel.getComponentCount();
-        if (msgs.size() * 2 == currentCount) return; 
+        // [FIX] Cập nhật UI thông minh hơn: Chỉ vẽ lại nếu có tin nhắn mới thực sự
+        // Ở đây đơn giản hóa bằng cách so sánh số lượng
+        int currentCount = chatAreaPanel.getComponentCount() - 1; // Trừ đi cái Glue ở đầu
+        // Mỗi tin nhắn gồm 2 component (Bubble + Strut)
+        if (currentCount > 0 && msgs.size() * 2 == currentCount) return;
 
         JScrollBar vertical = chatScrollPane.getVerticalScrollBar();
         boolean isAtBottom = vertical.getValue() >= (vertical.getMaximum() - vertical.getVisibleAmount() - 50);
@@ -231,7 +266,6 @@ public class ChatForm extends JFrame {
         JPanel rowPanel = new JPanel(new FlowLayout(isMe ? FlowLayout.RIGHT : FlowLayout.LEFT));
         rowPanel.setBackground(new Color(245, 245, 245));
         rowPanel.setOpaque(false);
-        // chiều cao tối đa cho rowPanel để không bị giãn
         rowPanel.setMaximumSize(new Dimension(Short.MAX_VALUE, 100)); 
         
         JPanel bubble = new JPanel();
@@ -266,8 +300,6 @@ public class ChatForm extends JFrame {
         
         rowPanel.add(bubble);
         chatAreaPanel.add(rowPanel);
-        
-        // Khoảng cách cố định giữa các tin nhắn
         chatAreaPanel.add(Box.createVerticalStrut(10)); 
     }
 
@@ -299,35 +331,28 @@ public class ChatForm extends JFrame {
             @Override protected void done() {
                 try {
                     List<String> senders = get();
-                    boolean needRefreshList = false;
-                    
+                    boolean needRefresh = false;
                     for (String sender : senders) {
+                        // Nếu tin nhắn đến từ người KHÔNG phải người đang chat
                         if (currentPartner == null || !currentPartner.equals(sender)) {
-                            showToast("Tin nhắn mới từ: " + sender);
-                            // Đánh dấu có tin mới trong danh sách
-                            markUnread(sender);
-                            needRefreshList = true;
+                            // [FIX] Tin nhắn đầu tiên cũng hiện Toast và chấm đỏ
+                            if (!unreadSenders.contains(sender)) {
+                                showToast("Tin nhắn mới từ: " + sender);
+                                unreadSenders.add(sender);
+                                needRefresh = true;
+                            }
                         }
                     }
-                    if (!senders.isEmpty()) lastCheckTime = now;
-                    if (needRefreshList) contactList.repaint(); 
+                    if (!senders.isEmpty()) {
+                        lastCheckTime = now;
+                        // Nếu người mới chưa có trong list -> Load lại list
+                        loadContactList();
+                    }
+                    if (needRefresh) contactList.repaint();
                     
                 } catch (Exception e) { }
             }
         }.execute();
-    }
-    
-    private void markUnread(String sender) {
-        boolean found = false;
-        for (int i = 0; i < contactListModel.size(); i++) {
-            ContactItem item = contactListModel.get(i);
-            if (item.username.equals(sender)) {
-                item.hasUnread = true;
-                found = true;
-                break;
-            }
-        }
-        if (!found) loadContactList();
     }
     
     private void showToast(String msg) {
@@ -347,10 +372,16 @@ public class ChatForm extends JFrame {
     }
     
     private void startHeartbeat() { heartbeatTimer = new Timer(3000, e -> checkSessionStatus()); heartbeatTimer.start(); }
+    
     private void checkSessionStatus() {
          new SwingWorker<Boolean, Void>() {
             @Override protected Boolean doInBackground() { return authService.isSessionValid(session.username(), session.sessionId()); }
-            @Override protected void done() { try { if (!get()) { heartbeatTimer.stop(); if (pollingTimer != null) pollingTimer.stop(); JOptionPane.showMessageDialog(ChatForm.this, "Phiên đăng nhập hết hạn!"); new LoginForm().setVisible(true); dispose(); } } catch (Exception e) { } }
+            @Override protected void done() { try { if (!get()) { 
+                // [FIX] Dọn dẹp sạch sẽ khi bị đá
+                dispose(); 
+                JOptionPane.showMessageDialog(null, "Phiên đăng nhập hết hạn!"); 
+                new LoginForm().setVisible(true); 
+            } } catch (Exception e) { } }
         }.execute();
     }
 }
