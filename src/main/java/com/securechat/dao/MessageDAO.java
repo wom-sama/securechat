@@ -1,4 +1,4 @@
-/* MessageDAO.java - Bản thêm TTL Index (Tự hủy) */
+/* MessageDAO.java */
 package com.securechat.dao;
 
 import com.securechat.config.AppConfig;
@@ -28,20 +28,9 @@ public class MessageDAO {
     private void createIndexes() {
         try {
             MongoCollection<Document> c = col();
-            
-            // 1. Index cho hiệu năng Query (Giữ nguyên)
-            c.createIndex(Indexes.compoundIndex(
-                Indexes.ascending("to"), 
-                Indexes.descending("ts")
-            ), new IndexOptions().name("idx_inbox"));
-            
-            c.createIndex(Indexes.compoundIndex(
-                Indexes.ascending("from"), 
-                Indexes.descending("ts")
-            ), new IndexOptions().name("idx_sent"));
+            c.createIndex(Indexes.compoundIndex(Indexes.ascending("to"), Indexes.descending("ts")), new IndexOptions().name("idx_inbox"));
+            c.createIndex(Indexes.compoundIndex(Indexes.ascending("from"), Indexes.descending("ts")), new IndexOptions().name("idx_sent"));
 
-            // [MỚI] 2. TTL Index (Time-To-Live) cho tính năng Tự hủy
-            // expireAfter(0L, TimeUnit.SECONDS) nghĩa là: Xóa ngay khi thời gian hiện tại > giá trị trường "expireAt"
             IndexOptions ttlOptions = new IndexOptions()
                     .name("idx_auto_delete")
                     .expireAfter(0L, TimeUnit.SECONDS); 
@@ -49,8 +38,6 @@ public class MessageDAO {
             c.createIndex(Indexes.ascending("expireAt"), ttlOptions);
             
         } catch (Exception e) {
-            // Lưu ý: Nếu Index đã tồn tại với cấu hình khác, MongoDB sẽ báo lỗi.
-            // Khi demo, nếu muốn đổi thời gian, bạn cần vào Atlas xóa index "idx_auto_delete" đi để app tạo lại.
             System.out.println("Index creation warning: " + e.getMessage());
         }
     }
@@ -59,14 +46,9 @@ public class MessageDAO {
         col().insertOne(msgDoc);
     }
 
-    // --- CÁC HÀM QUERY CŨ GIỮ NGUYÊN ---
-
-    public List<String> getRecentContacts(String myUsername) {
-        List<String> senders = col().distinct("from", Filters.eq("to", myUsername), String.class)
-                                    .into(new ArrayList<>());
-        List<String> receivers = col().distinct("originalTo", Filters.eq("from", myUsername), String.class)
-                                     .into(new ArrayList<>());
-
+    public List<String> getContactsFromMessages(String myUsername) {
+        List<String> senders = col().distinct("from", Filters.eq("to", myUsername), String.class).into(new ArrayList<>());
+        List<String> receivers = col().distinct("originalTo", Filters.eq("from", myUsername), String.class).into(new ArrayList<>());
         return Stream.concat(senders.stream(), receivers.stream())
                      .distinct()
                      .filter(u -> !u.equals(myUsername)) 
@@ -77,10 +59,7 @@ public class MessageDAO {
         List<Document> out = new ArrayList<>();
         col().find(Filters.and(
                     Filters.eq("to", myUsername),
-                    Filters.or(
-                        Filters.eq("from", partnerUsername),
-                        Filters.eq("originalTo", partnerUsername)
-                    )
+                    Filters.or(Filters.eq("from", partnerUsername), Filters.eq("originalTo", partnerUsername))
                 ))
                 .sort(Sorts.ascending("ts")) 
                 .limit(limit)
@@ -88,12 +67,20 @@ public class MessageDAO {
         return out;
     }
     
+    // [MỚI] Xóa toàn bộ cuộc hội thoại giữa mình và đối phương (Chỉ xóa bản copy của mình)
+    public void deleteConversation(String myUsername, String partnerUsername) {
+        col().deleteMany(Filters.and(
+            Filters.eq("to", myUsername), // Quan trọng: Chỉ xóa tin trong hộp thư của mình
+            Filters.or(
+                Filters.eq("from", partnerUsername),      // Tin họ gửi đến
+                Filters.eq("originalTo", partnerUsername) // Tin mình gửi đi (bản lưu)
+            )
+        ));
+    }
+    
     public List<String> getSendersSince(String myUsername, long lastCheckTime) {
         return col().distinct("from", 
-                Filters.and(
-                    Filters.eq("to", myUsername),
-                    Filters.gt("ts", lastCheckTime)
-                ), String.class)
+                Filters.and(Filters.eq("to", myUsername), Filters.gt("ts", lastCheckTime)), String.class)
                 .into(new ArrayList<>());
     }
 }
