@@ -1,7 +1,4 @@
-/*
- * Click nbfs://nbhost/SystemFileSystem/Templates/Licenses/license-default.txt to change this license
- * Click nbfs://nbhost/SystemFileSystem/Templates/Classes/Class.java to edit this template
- */
+/* MessageDAO.java - Bản thêm TTL Index (Tự hủy) */
 package com.securechat.dao;
 
 import com.securechat.config.AppConfig;
@@ -14,14 +11,12 @@ import com.mongodb.client.model.Sorts;
 import org.bson.Document;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import java.util.ArrayList;
-import java.util.List;
-
 public class MessageDAO {
-    
+
     public MessageDAO() {
         createIndexes();
     }
@@ -33,6 +28,8 @@ public class MessageDAO {
     private void createIndexes() {
         try {
             MongoCollection<Document> c = col();
+            
+            // 1. Index cho hiệu năng Query (Giữ nguyên)
             c.createIndex(Indexes.compoundIndex(
                 Indexes.ascending("to"), 
                 Indexes.descending("ts")
@@ -42,7 +39,18 @@ public class MessageDAO {
                 Indexes.ascending("from"), 
                 Indexes.descending("ts")
             ), new IndexOptions().name("idx_sent"));
+
+            // [MỚI] 2. TTL Index (Time-To-Live) cho tính năng Tự hủy
+            // expireAfter(0L, TimeUnit.SECONDS) nghĩa là: Xóa ngay khi thời gian hiện tại > giá trị trường "expireAt"
+            IndexOptions ttlOptions = new IndexOptions()
+                    .name("idx_auto_delete")
+                    .expireAfter(0L, TimeUnit.SECONDS); 
+            
+            c.createIndex(Indexes.ascending("expireAt"), ttlOptions);
+            
         } catch (Exception e) {
+            // Lưu ý: Nếu Index đã tồn tại với cấu hình khác, MongoDB sẽ báo lỗi.
+            // Khi demo, nếu muốn đổi thời gian, bạn cần vào Atlas xóa index "idx_auto_delete" đi để app tạo lại.
             System.out.println("Index creation warning: " + e.getMessage());
         }
     }
@@ -51,11 +59,11 @@ public class MessageDAO {
         col().insertOne(msgDoc);
     }
 
+    // --- CÁC HÀM QUERY CŨ GIỮ NGUYÊN ---
+
     public List<String> getRecentContacts(String myUsername) {
         List<String> senders = col().distinct("from", Filters.eq("to", myUsername), String.class)
                                     .into(new ArrayList<>());
-        
-
         List<String> receivers = col().distinct("originalTo", Filters.eq("from", myUsername), String.class)
                                      .into(new ArrayList<>());
 
@@ -65,14 +73,10 @@ public class MessageDAO {
                      .collect(Collectors.toList());
     }
 
-
-    //  tìm tin nhắn mà "to" = mình, và ("from" = partner HOẶC "originalTo" = partner)
     public List<Document> findConversation(String myUsername, String partnerUsername, int limit) {
         List<Document> out = new ArrayList<>();
-        // 1. Tin họ gửi mình: to=Me, from=Partner
-        // 2. Tin mình gửi họ (bản copy): to=Me, originalTo=Partner 
         col().find(Filters.and(
-                    Filters.eq("to", myUsername), 
+                    Filters.eq("to", myUsername),
                     Filters.or(
                         Filters.eq("from", partnerUsername),
                         Filters.eq("originalTo", partnerUsername)
@@ -83,10 +87,8 @@ public class MessageDAO {
                 .into(out);
         return out;
     }
-   // Tìm danh sách những người vừa gửi tin nhắn cho mình sau thời điểm lastCheck
-    // Dùng cho tính năng thông báo Real-time
+    
     public List<String> getSendersSince(String myUsername, long lastCheckTime) {
-        // Tìm các tin nhắn có 'to' là mình VÀ 'ts' lớn hơn thời gian check lần cuối
         return col().distinct("from", 
                 Filters.and(
                     Filters.eq("to", myUsername),

@@ -1,7 +1,4 @@
-/*
- * Click nbfs://nbhost/SystemFileSystem/Templates/Licenses/license-default.txt to change this license
- * Click nbfs://nbhost/SystemFileSystem/Templates/Classes/Class.java to edit this template
- */
+/* ChatService.java (Cập nhật logic expireAt) */
 package com.securechat.service;
 
 import com.securechat.dao.MessageDAO;
@@ -15,10 +12,14 @@ import java.security.KeyPair;
 import java.security.PublicKey;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Date; // [MỚI]
 
 public class ChatService {
     private final UserDAO userDAO = new UserDAO();
     private final MessageDAO messageDAO = new MessageDAO();
+    
+    // [CẤU HÌNH] Thời gian tự hủy (Demo: 60 giây)
+    private static final long TTL_MS = 24*60*60 * 1000; 
 
     public void sendMessage(AuthService.Session sender, String toUser, String plaintext) {
         Document receiverDoc = userDAO.findByUsername(toUser);
@@ -27,11 +28,14 @@ public class ChatService {
         Document senderDoc = userDAO.findByUsername(sender.username());
 
         long ts = System.currentTimeMillis();
+        
+        // [MỚI] Tính thời điểm hết hạn
+        Date expireAt = new Date(ts + TTL_MS);
+
         byte[] digestInput = Canonical.digestInput(sender.username(), toUser, ts, plaintext);
         byte[] digest = SHA256.hash(digestInput);
         byte[] sig = Keys.signEd25519(sender.signPriv(), digest);
         
-        // Payload chung
         String payload =
                 "from=" + sender.username() + "\n" +
                 "to=" + toUser + "\n" +
@@ -41,15 +45,15 @@ public class ChatService {
                 "sigB64=" + B64.enc(sig) + "\n";
         byte[] payloadBytes = payload.getBytes(StandardCharsets.UTF_8);
 
-        // --- BẢN 1: Gửi cho Người nhận (Bob) ---
         PublicKey bobEcdhPub = KeyProtector.decodeX25519Public(B64.dec(receiverDoc.getString("ecdhPubB64")));
-        createAndSaveMessage(sender.username(), toUser, null, ts, payloadBytes, bobEcdhPub);
-        // --- BẢN 2: Gửi cho Chính mình (Alice - để lưu history) ---
+        createAndSaveMessage(sender.username(), toUser, null, ts, expireAt, payloadBytes, bobEcdhPub);
+
         PublicKey aliceEcdhPub = KeyProtector.decodeX25519Public(B64.dec(senderDoc.getString("ecdhPubB64")));
-        createAndSaveMessage(sender.username(), sender.username(), toUser, ts, payloadBytes, aliceEcdhPub);
+        createAndSaveMessage(sender.username(), sender.username(), toUser, ts, expireAt, payloadBytes, aliceEcdhPub);
     }
     
-    private void createAndSaveMessage(String from, String to, String originalTo, long ts, byte[] payloadBytes, PublicKey recipientPub) {
+    // Thêm tham số Date expireAt
+    private void createAndSaveMessage(String from, String to, String originalTo, long ts, Date expireAt, byte[] payloadBytes, PublicKey recipientPub) {
         KeyPair eph = Keys.genX25519();
         byte[] shared = Keys.x25519SharedSecret(eph.getPrivate(), recipientPub);
         byte[] iv = Rand.bytes(12);
@@ -64,6 +68,7 @@ public class ChatService {
                 .append("from", from)
                 .append("to", to)
                 .append("ts", ts)
+                .append("expireAt", expireAt) // [MỚI] Trường quyết định số phận tin nhắn
                 .append("ephPubB64", B64.enc(KeyProtector.pubEncoded(eph.getPublic())))
                 .append("ivB64", B64.enc(iv))
                 .append("ciphertextB64", B64.enc(ct))
@@ -72,13 +77,13 @@ public class ChatService {
                 .append("sigAlg", "Ed25519");
         
         if (originalTo != null) {
-            doc.append("originalTo", originalTo); // Đánh dấu đây là tin nhắn trong mục "Đã gửi"
+            doc.append("originalTo", originalTo);
         }
         
         messageDAO.insertMessage(doc);
     }
 
-    // [CẬP NHẬT] Load hội thoại
+    // ... (Các hàm loadConversation, checkNewMessages... giữ nguyên không đổi) ...
     public List<DecryptedMessage> loadConversation(AuthService.Session session, String partner, int limit) {
         List<Document> docs = messageDAO.findConversation(session.username(), partner, limit);
         List<DecryptedMessage> out = new ArrayList<>();
@@ -86,19 +91,15 @@ public class ChatService {
         for (Document d : docs) {
             DecryptedMessage dm = new DecryptedMessage();
             try {
-                // Lấy thông tin gốc từ DB
                 String from = d.getString("from");
-                // Nếu có originalTo, tức là tin này do mình gửi đi. Nếu không, là tin mình nhận.
                 String originalTo = d.getString("originalTo");
                 String realTo = (originalTo != null) ? originalTo : d.getString("to");
-                
                 long ts = d.getLong("ts");
 
                 PublicKey ephPub = KeyProtector.decodeX25519Public(B64.dec(d.getString("ephPubB64")));
                 byte[] iv = B64.dec(d.getString("ivB64"));
                 byte[] ct = B64.dec(d.getString("ciphertextB64"));
 
-                // Decrypt (Dùng khóa của mình vì bản ghi này được mã hóa cho mình - dù là inbox hay sent)
                 byte[] shared = Keys.x25519SharedSecret(session.ecdhPriv(), ephPub);
                 byte[] aesKey = HKDF.deriveAes256(shared, iv, "SecureChat msg key".getBytes(StandardCharsets.UTF_8));
 
@@ -109,7 +110,6 @@ public class ChatService {
                 String msg = extract(payload, "msg");
                 String sigB64 = extract(payload, "sigB64");
 
-                // Verify
                 Document senderDoc = userDAO.findByUsername(from);
                 if (senderDoc != null) {
                     PublicKey senderSignPub = KeyProtector.decodeEd25519Public(B64.dec(senderDoc.getString("signPubB64")));
@@ -150,11 +150,9 @@ public class ChatService {
         }
         return "";
     }
-    //kiem tra user ton tai
     public boolean checkUserExists(String username) {
-    return userDAO.findByUsername(username) != null;
-}
-    // Kiểm tra xem có tin nhắn mới nào từ sau lần check cuối không
+        return userDAO.findByUsername(username) != null;
+    }
     public List<String> checkNewMessages(String myUser, long lastCheckTime) {
         return messageDAO.getSendersSince(myUser, lastCheckTime);
     }
