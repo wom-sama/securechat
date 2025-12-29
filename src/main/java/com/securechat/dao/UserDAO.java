@@ -23,6 +23,7 @@ public class UserDAO {
         col().insertOne(userDoc);
     }
     
+    // --- CÁC HÀM CŨ GIỮ NGUYÊN ---
     public void updateSessionId(String username, String sessionId) {
         col().updateOne(Filters.eq("username", username), Updates.set("sessionId", sessionId));
     }
@@ -47,28 +48,48 @@ public class UserDAO {
         return 0L; 
     }
 
-    // [MỚI] Thêm một người vào danh sách liên hệ (Sử dụng addToSet để không trùng lặp)
     public void addContact(String myUsername, String partnerUsername) {
-        col().updateOne(
-            Filters.eq("username", myUsername),
-            Updates.addToSet("contacts", partnerUsername)
-        );
+        col().updateOne(Filters.eq("username", myUsername), Updates.addToSet("contacts", partnerUsername));
     }
 
-    // [MỚI] Lấy danh sách liên hệ đã lưu
     public List<String> getSavedContacts(String myUsername) {
         Document doc = col().find(Filters.eq("username", myUsername))
                             .projection(new Document("contacts", 1))
                             .first();
-        if (doc != null && doc.containsKey("contacts")) {
-            return doc.getList("contacts", String.class);
-        }
+        if (doc != null && doc.containsKey("contacts")) return doc.getList("contacts", String.class);
         return new ArrayList<>();
     }
+    
     public void removeContact(String myUsername, String partnerUsername) {
+        col().updateOne(Filters.eq("username", myUsername), Updates.pull("contacts", partnerUsername));
+    }
+
+    // --- [MỚI] CÁC HÀM XỬ LÝ LOCKOUT ---
+
+    // 1. Tăng số lần nhập sai lên 1
+    public void incrementFailedAttempts(String username) {
         col().updateOne(
-            Filters.eq("username", myUsername),
-            Updates.pull("contacts", partnerUsername) // $pull: Kéo phần tử ra khỏi mảng
+            Filters.eq("username", username),
+            Updates.inc("failedAttempts", 1) // Toán tử $inc: cộng dồn
+        );
+    }
+
+    // 2. Reset số lần sai về 0 (khi đăng nhập thành công hoặc hết hạn khóa)
+    public void resetFailedAttempts(String username) {
+        col().updateOne(
+            Filters.eq("username", username),
+            Updates.combine(
+                Updates.set("failedAttempts", 0),
+                Updates.unset("lockoutUntil") // Xóa trường khóa đi
+            )
+        );
+    }
+
+    // 3. Khóa tài khoản đến thời điểm cụ thể
+    public void lockAccount(String username, long unlockTime) {
+        col().updateOne(
+            Filters.eq("username", username),
+            Updates.set("lockoutUntil", unlockTime)
         );
     }
 }

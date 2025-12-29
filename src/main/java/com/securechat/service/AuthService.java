@@ -1,3 +1,4 @@
+/* AuthService.java */
 package com.securechat.service;
 
 import com.securechat.dao.UserDAO;
@@ -8,6 +9,10 @@ import java.security.KeyPair;
 
 public class AuthService {
     private final UserDAO userDAO = new UserDAO();
+    
+    // Cấu hình Lockout
+    private static final int MAX_ATTEMPTS = 5;
+    private static final long LOCK_TIME_MS = 5*60* 1000; // 5 Phút (Để test bạn có thể sửa thành 30s)
 
     public void register(String username, char[] password) {
         if (userDAO.findByUsername(username) != null) {
@@ -29,6 +34,7 @@ public class AuthService {
                 .append("pwdSaltB64", B64.enc(pwdSalt))
                 .append("pwdHashB64", B64.enc(pwdHash))
                 .append("pwdIters", pwdIters)
+                .append("failedAttempts", 0) // [MỚI] Khởi tạo bộ đếm
                 .append("signPubB64", B64.enc(KeyProtector.pubEncoded(signKP.getPublic())))
                 .append("signPrivEncB64", signBlob.ciphertextB64())
                 .append("signPrivIvB64", signBlob.ivB64())
@@ -47,14 +53,40 @@ public class AuthService {
         Document u = userDAO.findByUsername(username);
         if (u == null) throw new IllegalArgumentException("User not found");
 
+        // --- [LOGIC 1] KIỂM TRA KHÓA TÀI KHOẢN ---
+        long currentTime = System.currentTimeMillis();
+        if (u.containsKey("lockoutUntil")) {
+            long unlockTime = u.getLong("lockoutUntil");
+            if (currentTime < unlockTime) {
+                long secondsLeft = (unlockTime - currentTime) / 1000;
+                throw new IllegalArgumentException("Account locked! Try again in " + secondsLeft + "s.");
+            }
+        }
+
+        // --- [LOGIC 2] CHECK PASSWORD ---
         byte[] salt = B64.dec(u.getString("pwdSaltB64"));
         int iters = u.getInteger("pwdIters");
         byte[] expected = B64.dec(u.getString("pwdHashB64"));
         byte[] actual = PBKDF2.deriveKey(password, salt, iters, 32);
 
         if (!PBKDF2.constantTimeEquals(expected, actual)) {
-            throw new IllegalArgumentException("Invalid password");
+            // -- [LOGIC 3] XỬ LÝ KHI SAI PASS --
+            userDAO.incrementFailedAttempts(username);
+            
+            // Check xem đã vượt quá giới hạn chưa
+            int currentFails = u.getInteger("failedAttempts", 0) + 1; // +1 vì vừa sai thêm phát nữa
+            if (currentFails >= MAX_ATTEMPTS) {
+                userDAO.lockAccount(username, currentTime + LOCK_TIME_MS);
+                throw new IllegalArgumentException("Too many failed attempts. Account locked for 5 minutes.");
+            }
+            
+            int attemptsLeft = MAX_ATTEMPTS - currentFails;
+            throw new IllegalArgumentException("Invalid password. " + attemptsLeft + " attempts remaining.");
         }
+
+        // --- [LOGIC 4] ĐĂNG NHẬP THÀNH CÔNG -> RESET ---
+        userDAO.resetFailedAttempts(username);
+        
         String newSessionId = UUID.randomUUID().toString();
         userDAO.updateSessionId(username, newSessionId);
 
@@ -83,12 +115,12 @@ public class AuthService {
         return new Session(username, signPub, signPriv, ecdhPub, ecdhPriv, newSessionId);
     }
     
+    // ... (Các hàm khác giữ nguyên) ...
     public boolean isSessionValid(String username, String mySessionId) {
         String dbSessionId = userDAO.getSessionId(username);
         return mySessionId != null && mySessionId.equals(dbSessionId);
     }
     
-    // [MỚI] Các hàm hỗ trợ Last Logout
     public void logout(String username) {
         userDAO.updateLastLogout(username);
     }
