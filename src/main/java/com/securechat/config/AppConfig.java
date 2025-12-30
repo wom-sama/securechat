@@ -4,6 +4,7 @@
  */
 package com.securechat.config;
 import io.github.cdimascio.dotenv.Dotenv;
+import java.nio.charset.StandardCharsets;
 /**
  *
  * @author ADMIN
@@ -20,5 +21,15 @@ public final class AppConfig {
 
     public static String getUri() {
         return dotenv.get("MONGODB_URI");
+    }
+    
+    public static byte[] getProfileKey() {
+        String k = dotenv.get("PROFILE_SECRET_KEY");
+        // Fallback cho demo nếu quên config trong .env (Chỉ dùng lúc dev)
+        if (k == null || k.length() < 32) {
+             k = "DEFAULT_MASTER_KEY_32_BYTES_LONG!!"; 
+        }
+        // Cắt đúng 32 byte để dùng cho AES-256
+        return k.substring(0, 32).getBytes(StandardCharsets.UTF_8);
     }
 }

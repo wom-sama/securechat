@@ -1,4 +1,3 @@
-/* MessageDAO.java */
 package com.securechat.dao;
 
 import com.securechat.config.AppConfig;
@@ -67,7 +66,6 @@ public class MessageDAO {
         return out;
     }
     
-    // [MỚI] Xóa toàn bộ cuộc hội thoại giữa mình và đối phương (Chỉ xóa bản copy của mình)
     public void deleteConversation(String myUsername, String partnerUsername) {
         col().deleteMany(Filters.and(
             Filters.eq("to", myUsername), // Quan trọng: Chỉ xóa tin trong hộp thư của mình
