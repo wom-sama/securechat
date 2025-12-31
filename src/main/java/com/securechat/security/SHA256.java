@@ -5,6 +5,7 @@
 package com.securechat.security;
 
 import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 
 public final class SHA256 {
     private SHA256() {}
@@ -12,7 +13,7 @@ public final class SHA256 {
     public static byte[] hash(byte[] data) {
         try {
             return MessageDigest.getInstance("SHA-256").digest(data);
-        } catch (Exception e) {
+        } catch (NoSuchAlgorithmException e) {
             throw new RuntimeException(e);
         }
     }

@@ -4,7 +4,13 @@
  */
 package com.securechat.security;
 
+import java.security.InvalidAlgorithmParameterException;
+import java.security.InvalidKeyException;
+import java.security.NoSuchAlgorithmException;
+import javax.crypto.BadPaddingException;
 import javax.crypto.Cipher;
+import javax.crypto.IllegalBlockSizeException;
+import javax.crypto.NoSuchPaddingException;
 import javax.crypto.spec.GCMParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
 
@@ -19,7 +25,7 @@ public final class AesGcm {
             c.init(Cipher.ENCRYPT_MODE, k, spec);
             if (aad != null) c.updateAAD(aad);
             return c.doFinal(plaintext);
-        } catch (Exception e) {
+        } catch (InvalidAlgorithmParameterException | InvalidKeyException | NoSuchAlgorithmException | BadPaddingException | IllegalBlockSizeException | NoSuchPaddingException e) {
             throw new RuntimeException("AES-GCM encrypt failed", e);
         }
     }
@@ -32,7 +38,7 @@ public final class AesGcm {
             c.init(Cipher.DECRYPT_MODE, k, spec);
             if (aad != null) c.updateAAD(aad);
             return c.doFinal(ciphertext);
-        } catch (Exception e) {
+        } catch (InvalidAlgorithmParameterException | InvalidKeyException | NoSuchAlgorithmException | BadPaddingException | IllegalBlockSizeException | NoSuchPaddingException e) {
             throw new RuntimeException("AES-GCM decrypt failed", e);
         }
     }

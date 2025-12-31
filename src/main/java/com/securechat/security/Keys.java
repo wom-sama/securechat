@@ -13,7 +13,7 @@ public final class Keys {
         try {
             KeyPairGenerator kpg = KeyPairGenerator.getInstance("Ed25519");
             return kpg.generateKeyPair();
-        } catch (Exception e) {
+        } catch (NoSuchAlgorithmException e) {
             throw new RuntimeException("Ed25519 keygen failed", e);
         }
     }
@@ -22,7 +22,7 @@ public final class Keys {
         try {
             KeyPairGenerator kpg = KeyPairGenerator.getInstance("X25519");
             return kpg.generateKeyPair();
-        } catch (Exception e) {
+        } catch (NoSuchAlgorithmException e) {
             throw new RuntimeException("X25519 keygen failed", e);
         }
     }
@@ -33,7 +33,7 @@ public final class Keys {
             s.initSign(priv);
             s.update(msg);
             return s.sign();
-        } catch (Exception e) {
+        } catch (InvalidKeyException | NoSuchAlgorithmException | SignatureException e) {
             throw new RuntimeException("Ed25519 sign failed", e);
         }
     }
@@ -44,7 +44,7 @@ public final class Keys {
             s.initVerify(pub);
             s.update(msg);
             return s.verify(sig);
-        } catch (Exception e) {
+        } catch (InvalidKeyException | NoSuchAlgorithmException | SignatureException e) {
             throw new RuntimeException("Ed25519 verify failed", e);
         }
     }
@@ -55,7 +55,7 @@ public final class Keys {
             ka.init(myPriv);
             ka.doPhase(theirPub, true);
             return ka.generateSecret();
-        } catch (Exception e) {
+        } catch (IllegalStateException | InvalidKeyException | NoSuchAlgorithmException e) {
             throw new RuntimeException("X25519 ECDH failed", e);
         }
     }

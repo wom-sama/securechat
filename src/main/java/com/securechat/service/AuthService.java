@@ -160,7 +160,6 @@ public class AuthService {
         return new Session(username, signPub, signPriv, ecdhPub, ecdhPriv, newSessionId);
     }
     
-    // ... (Các hàm khác giữ nguyên) ...
     public boolean isSessionValid(String username, String mySessionId) {
         String dbSessionId = userDAO.getSessionId(username);
         return mySessionId != null && mySessionId.equals(dbSessionId);
@@ -229,11 +228,10 @@ public class AuthService {
     String encFullName = profileSec.encrypt(fullName);
     String encAddress = profileSec.encrypt(address);
     String encGender = profileSec.encrypt(gender);
-    
     userDAO.updateFullProfile(username, encEmail, encFullName, encAddress, encGender);
 }
 
-// [MỚI] Hàm cập nhật Avatar
+// Hàm cập nhật Avatar
 public void updateAvatar(String username, byte[] imageBytes) {
     if (imageBytes == null || imageBytes.length == 0) return;
     // Chuyển ảnh sang Base64 rồi mã hóa AES System Key
@@ -242,7 +240,7 @@ public void updateAvatar(String username, byte[] imageBytes) {
     userDAO.updateAvatar(username, encAvatar);
 }
 
-// [MỚI] Hàm lấy Avatar (Trả về bytes ảnh để hiển thị)
+//  Hàm lấy Avatar (Trả về bytes ảnh để hiển thị)
 public byte[] getUserAvatar(String username) {
     String encAvatar = userDAO.getEncryptedAvatar(username);
     if (encAvatar == null) return null;

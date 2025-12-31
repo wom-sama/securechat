@@ -13,14 +13,14 @@ public class FileDAO {
     private static final String COL_FILES = "file_store";
 
     public FileDAO() {
-        // [QUAN TRỌNG] Tạo chỉ mục TTL (Time To Live) cho MongoDB
+        // Tạo chỉ mục TTL (Time To Live) cho MongoDB
         // File sẽ tự động bị xóa sau khi field "expireAt" đến hạn
         try {
             MongoCollection<Document> col = MongoProvider.db().getCollection(COL_FILES);
             IndexOptions indexOptions = new IndexOptions().expireAfter(0L, TimeUnit.SECONDS);
             col.createIndex(Indexes.ascending("expireAt"), indexOptions);
         } catch (Exception e) {
-            // Index có thể đã tồn tại, bỏ qua lỗi
+         
         }
     }
 

@@ -5,6 +5,7 @@
 package com.securechat.security;
 
 import java.security.KeyFactory;
+import java.security.NoSuchAlgorithmException;
 import java.security.PrivateKey;
 import java.security.PublicKey;
 import java.security.spec.*;
@@ -20,25 +21,25 @@ public final class KeyProtector {
     public static PublicKey decodeEd25519Public(byte[] x509) {
         try {
             return KeyFactory.getInstance("Ed25519").generatePublic(new X509EncodedKeySpec(x509));
-        } catch (Exception e) { throw new RuntimeException(e); }
+        } catch (NoSuchAlgorithmException | InvalidKeySpecException e) { throw new RuntimeException(e); }
     }
 
     public static PrivateKey decodeEd25519Private(byte[] pkcs8) {
         try {
             return KeyFactory.getInstance("Ed25519").generatePrivate(new PKCS8EncodedKeySpec(pkcs8));
-        } catch (Exception e) { throw new RuntimeException(e); }
+        } catch (NoSuchAlgorithmException | InvalidKeySpecException e) { throw new RuntimeException(e); }
     }
 
     public static PublicKey decodeX25519Public(byte[] x509) {
         try {
             return KeyFactory.getInstance("X25519").generatePublic(new X509EncodedKeySpec(x509));
-        } catch (Exception e) { throw new RuntimeException(e); }
+        } catch (NoSuchAlgorithmException | InvalidKeySpecException e) { throw new RuntimeException(e); }
     }
 
     public static PrivateKey decodeX25519Private(byte[] pkcs8) {
         try {
             return KeyFactory.getInstance("X25519").generatePrivate(new PKCS8EncodedKeySpec(pkcs8));
-        } catch (Exception e) { throw new RuntimeException(e); }
+        } catch (NoSuchAlgorithmException | InvalidKeySpecException e) { throw new RuntimeException(e); }
     }
 
     // ----- Protect private key with password (PBKDF2 -> AES-GCM) -----
